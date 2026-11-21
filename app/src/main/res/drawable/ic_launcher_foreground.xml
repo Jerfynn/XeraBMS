@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Battery "tank" with a water line, matching the in-app SOC gauge. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#E4F1F3"
+        android:pathData="M47,25h14a2,2 0,0 1,2,2v4h-18v-4a2,2 0,0 1,2,-2z" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#E4F1F3"
+        android:strokeWidth="4"
+        android:pathData="M42,31h24a6,6 0,0 1,6,6v40a6,6 0,0 1,-6,6h-24a6,6 0,0 1,-6,-6v-40a6,6 0,0 1,6,-6z" />
+    <path
+        android:fillColor="#45D6CB"
+        android:pathData="M40,55q4.67,-4 9.33,0t9.33,0t9.34,0V75a4,4 0,0 1,-4,4H44a4,4 0,0 1,-4,-4Z" />
+</vector>
