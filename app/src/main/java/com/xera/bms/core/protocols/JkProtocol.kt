@@ -6,6 +6,7 @@ import com.xera.bms.core.Capability
 import com.xera.bms.core.Command
 import com.xera.bms.core.ascii
 import com.xera.bms.core.bytesOf
+import com.xera.bms.core.organized
 import com.xera.bms.core.s16le
 import com.xera.bms.core.s32le
 import com.xera.bms.core.u16be
@@ -70,7 +71,7 @@ class JkProtocol(
     private var firmwareHint32: Boolean? = null
 
     override val capabilities = Capability.entries.toSet()
-    override val parameters: List<BmsParameter> = settings.map { it.param }
+    override val parameters: List<BmsParameter> = settings.map { it.param.organized() }
 
     override fun initCommands() = listOf(
         Command(command(CMD_DEVICE_INFO), 400, "Device info"),
@@ -205,7 +206,7 @@ class JkProtocol(
             alarms = ERRORS.filterIndexed { bit, _ -> errors and (1 shl bit) != 0 },
             balanceCurrent = f.s16le(138 + o2) / 1000.0,
             balancingCells = if (balanceAction != 0) setOf(maxCell, minCell).filter { it < count }.toSet() else emptySet(),
-            soc = f.u8(141 + o2),
+            soc = f.u8(141 + o2).toDouble(),
             remainingAh = f.u32le(142 + o2) / 1000.0,
             nominalAh = f.u32le(146 + o2) / 1000.0,
             cycles = f.u32le(150 + o2).toInt(),

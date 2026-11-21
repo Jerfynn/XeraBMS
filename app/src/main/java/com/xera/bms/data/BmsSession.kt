@@ -6,6 +6,7 @@ import androidx.core.content.ContextCompat
 import com.xera.bms.ble.BleConnection
 import com.xera.bms.ble.BleNotification
 import com.xera.bms.ble.GattCharInfo
+import com.xera.bms.core.BmsAction
 import com.xera.bms.core.BmsParameter
 import com.xera.bms.core.BmsProtocol
 import com.xera.bms.core.BmsSnapshot
@@ -37,7 +38,9 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.io.File
 import java.util.concurrent.Executors
+import kotlin.math.abs
 import kotlin.math.min
+import kotlin.math.pow
 
 enum class LinkState { IDLE, CONNECTING, DETECTING, CONNECTED, RECONNECTING }
 
@@ -81,6 +84,12 @@ class BmsSession(private val app: Context, private val settings: SettingsReposit
 
     private val _paramValues = MutableStateFlow<Map<String, Double>>(emptyMap())
     val paramValues: StateFlow<Map<String, Double>> = _paramValues.asStateFlow()
+
+    private val _paramTexts = MutableStateFlow<Map<String, String>>(emptyMap())
+    val paramTexts: StateFlow<Map<String, String>> = _paramTexts.asStateFlow()
+
+    private val _actions = MutableStateFlow<List<BmsAction>>(emptyList())
+    val actions: StateFlow<List<BmsAction>> = _actions.asStateFlow()
 
     private val _capabilities = MutableStateFlow<Set<Capability>>(emptySet())
     val capabilities: StateFlow<Set<Capability>> = _capabilities.asStateFlow()
@@ -138,6 +147,8 @@ class BmsSession(private val app: Context, private val settings: SettingsReposit
             _capabilities.value = demo.capabilities
             _parameters.value = demo.parameters
             _paramValues.value = demo.parameterValues
+            _paramTexts.value = demo.parameterTexts
+            _actions.value = demo.actions
             _status.value = SessionStatus(
                 LinkState.CONNECTED, "Demo battery", "DEMO", demo.id, demo.name, demo = true, everConnected = true,
             )
@@ -195,6 +206,7 @@ class BmsSession(private val app: Context, private val settings: SettingsReposit
         scope.launch { readParametersInternal() }
     }
 
+    /** Writes a number, reads it back, and reports whether the BMS confirmed it. */
     fun writeParameter(param: BmsParameter, value: Double) {
         scope.launch {
             val p = protocol ?: return@launch
@@ -206,18 +218,83 @@ class BmsSession(private val app: Context, private val settings: SettingsReposit
             }
             val cmds = p.writeParameterCommands(param, value)
             if (cmds.isEmpty()) {
-                _events.tryEmit("${param.label} can't be changed from the app")
+                _events.tryEmit("Can't change ${param.label} yet. Tap Read from BMS, then try again.")
                 return@launch
             }
-            _busy.value = "Writing ${param.label}…"
+            _busy.value = "Saving ${param.label}…"
             try {
-                bus.withLock { cmds.forEach { send(p, it) } }
-                delay(400)
-                _events.tryEmit("${param.label} sent to BMS")
+                bus.withLock {
+                    cmds.forEach { send(p, it) }
+                    delay(300)
+                    p.readBackCommands(param).forEach { send(p, it) }
+                }
+                delay(500)
+                publish(p, System.currentTimeMillis())
+                val got = p.parameterValues[param.key]
+                val tolerance = 0.5 * 10.0.pow(-param.decimals) + 1e-6
+                _events.tryEmit(
+                    if (got != null && abs(got - value) <= tolerance) {
+                        "${param.label} saved and confirmed by the BMS"
+                    } else {
+                        "The BMS did not accept the new ${param.label}"
+                    },
+                )
             } finally {
                 _busy.value = null
             }
-            readParametersInternal()
+        }
+    }
+
+    /** Writes text (e.g. the battery serial number), reads it back and confirms. */
+    fun writeText(param: BmsParameter, text: String) {
+        scope.launch {
+            val p = protocol ?: return@launch
+            val clean = text.trim().replace(Regex(" +"), " ")
+            if (p is DemoProtocol) {
+                p.applyText(param.key, clean)
+                publish(p, System.currentTimeMillis())
+                _events.tryEmit("${param.label} saved")
+                return@launch
+            }
+            val cmds = p.writeTextCommands(param, clean)
+            if (cmds.isEmpty()) {
+                _events.tryEmit("${param.label} can't be changed on this BMS")
+                return@launch
+            }
+            _busy.value = "Saving ${param.label}…"
+            try {
+                bus.withLock {
+                    cmds.forEach { send(p, it) }
+                    delay(300)
+                    p.readBackCommands(param).forEach { send(p, it) }
+                }
+                delay(800)
+                publish(p, System.currentTimeMillis())
+                val got = p.parameterTexts[param.key]
+                _events.tryEmit(
+                    if (got == clean) {
+                        "${param.label} saved and confirmed by the BMS"
+                    } else {
+                        "The BMS did not accept the new ${param.label}" + (got?.let { ". It still reports \"$it\"" } ?: "")
+                    },
+                )
+            } finally {
+                _busy.value = null
+            }
+        }
+    }
+
+    fun runAction(action: BmsAction) {
+        scope.launch {
+            val p = protocol ?: return@launch
+            if (p is DemoProtocol) {
+                _events.tryEmit("${action.label} isn't available in demo mode")
+                return@launch
+            }
+            val cmds = p.actionCommands(action)
+            if (cmds.isEmpty()) return@launch
+            bus.withLock { cmds.forEach { send(p, it) } }
+            _events.tryEmit("${action.label} sent")
         }
     }
 
@@ -314,6 +391,7 @@ class BmsSession(private val app: Context, private val settings: SettingsReposit
                     ble.enableNotifications(it.service.toString(), it.uuid.toString())
                 }
                 _capabilities.value = emptySet()
+                _actions.value = emptyList()
                 _parameters.value = emptyList()
                 _quickCommands.value = emptyList()
                 _status.value = SessionStatus(
@@ -327,6 +405,7 @@ class BmsSession(private val app: Context, private val settings: SettingsReposit
 
             protocol = proto
             _capabilities.value = proto.capabilities
+            _actions.value = proto.actions
             _parameters.value = proto.parameters
             _quickCommands.value = proto.quickCommands()
             _status.value = SessionStatus(
@@ -398,6 +477,8 @@ class BmsSession(private val app: Context, private val settings: SettingsReposit
         _parameters.value = emptyList()
         _paramValues.value = emptyMap()
         _capabilities.value = emptySet()
+        _paramTexts.value = emptyMap()
+        _actions.value = emptyList()
         _characteristics.value = emptyList()
         _quickCommands.value = emptyList()
         _busy.value = null
@@ -437,6 +518,7 @@ class BmsSession(private val app: Context, private val settings: SettingsReposit
         val snap = p.snapshot.copy(updatedAt = now)
         _snapshot.value = snap
         _paramValues.value = p.parameterValues
+        _paramTexts.value = p.parameterTexts
         trackAlarms(snap.alarms, now)
         if (snap.hasData && now - lastHistoryAt >= 1000) {
             lastHistoryAt = now
@@ -486,7 +568,7 @@ class BmsSession(private val app: Context, private val settings: SettingsReposit
         try {
             bus.withLock { cmds.forEach { send(p, it) } }
             delay(600)
-            _paramValues.value = p.parameterValues
+            publish(p, System.currentTimeMillis())
         } finally {
             _busy.value = null
         }

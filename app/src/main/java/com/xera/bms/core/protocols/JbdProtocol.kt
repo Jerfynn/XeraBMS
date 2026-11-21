@@ -5,6 +5,7 @@ import com.xera.bms.core.BmsParameter
 import com.xera.bms.core.Capability
 import com.xera.bms.core.Command
 import com.xera.bms.core.ascii
+import com.xera.bms.core.organized
 import com.xera.bms.core.s16be
 import com.xera.bms.core.u16be
 import com.xera.bms.core.u8
@@ -69,7 +70,7 @@ class JbdProtocol(
     private val regByKey = registers.associateBy { it.param.key }
 
     override val capabilities = setOf(Capability.MOSFET_CONTROL, Capability.PARAM_READ, Capability.PARAM_WRITE)
-    override val parameters: List<BmsParameter> = registers.map { it.param }
+    override val parameters: List<BmsParameter> = registers.map { it.param.organized() }
 
     override fun initCommands() = listOf(
         Command(readFrame(CMD_VERSION), 300, "Hardware version"),
@@ -188,7 +189,7 @@ class JbdProtocol(
             balancingCells = balancing,
             alarms = alarms,
             softwareVersion = "${sw shr 4}.${sw and 0x0F}",
-            soc = p.u8(19),
+            soc = p.u8(19).toDouble(),
             chargeFet = fet and 0x01 != 0,
             dischargeFet = fet and 0x02 != 0,
             temperatures = temps,

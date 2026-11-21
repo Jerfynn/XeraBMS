@@ -50,7 +50,7 @@ class ProtocolTest {
         near(0.0, s.current)
         near(7.20, s.remainingAh)
         near(10.00, s.nominalAh)
-        assertEquals(72, s.soc)
+        near(72.0, s.soc)
         assertEquals(true, s.chargeFet)
         assertEquals(true, s.dischargeFet)
         assertEquals(2, s.temperatures.size)
@@ -126,7 +126,7 @@ class ProtocolTest {
         val s = p.snapshot
         near(53.2, s.voltage, 1e-9)
         near(5.0, s.current, 1e-9)
-        assertEquals(92, s.soc) // 92.6 % is truncated, matching the Daly app
+        near(92.6, s.soc, 1e-9) // decimal SOC, like the Daly app
         assertEquals(42, s.cycles)
         assertEquals(listOf(3.300, 3.310, 3.295, 3.305), s.cellVoltages)
         assertEquals(listOf(25.0, 27.0), s.temperatures)
@@ -140,6 +140,87 @@ class ProtocolTest {
     fun dalyIgnoresEchoOfOwnRequest() {
         val p = DalyProtocol()
         assertEquals(0, p.feed(DalyProtocol.frame(0x80, 0x90), 0))
+    }
+
+
+    // ---------------------------------------------------------------- Daly settings
+
+    private fun dalyResp(cmd: Int, vararg d: Int) = DalyProtocol.frame(0x01, cmd, bytesOf(*d))
+
+    private fun dalyText(cmd: Int, n: Int, s: String) =
+        DalyProtocol.frame(0x01, cmd, byteArrayOf(n.toByte()) + s.padEnd(7, '\u0000').toByteArray(Charsets.ISO_8859_1))
+
+    private fun dalyWithSettings(): DalyProtocol {
+        val p = DalyProtocol()
+        val stream =
+            dalyResp(0x59, 0x0E, 0x10, 0x0E, 0x42, 0x0A, 0xF0, 0x0A, 0x5A) + // 3.600 / 3.650 / 2.800 / 2.650 V
+                dalyResp(0x5B, 0x7A, 0xA8, 0x7B, 0x0C, 0x6F, 0xB8, 0x6F, 0x54) + // chg 140/150 A, dsg 140/150 A
+                dalyResp(0x50, 0x00, 0x00, 0xC3, 0x50, 0x00, 0x00, 0x0C, 0x80) + // 50 Ah, 3.200 V
+                dalyResp(0x5C, 0x5F, 0x64, 0x2D, 0x28, 0x64, 0x69, 0x19, 0x14) + // temps
+                dalyResp(0x51, 0x02, 0x10, 0x0E, 0x00, 0x02, 0x00, 0x00, 0x00) + // 2 boards, 16 + 14 cells
+                dalyResp(0x53, 0x01, 0x01, 0x18, 0x0B, 0x15, 0x0E, 0x10, 0x00) + // LFP, 2024-11-21, 3600 s
+                dalyResp(0x61, 0x18, 0x0B, 0x15, 0x10, 0x1E, 0x00, 0x02, 0x38) + // clock, SOC 56.8 %
+                dalyText(0x57, 1, "229LD10") + dalyText(0x57, 2, "1000026") +
+                dalyText(0x57, 3, "") + dalyText(0x57, 4, "") + dalyText(0x57, 5, "") +
+                dalyText(0x63, 1, "H1.0_10") + dalyText(0x63, 2, "3E_309F")
+        assertEquals(14, feedChunked(p, stream, 11))
+        return p
+    }
+
+    @Test
+    fun dalyReadsSettingsSerialAndVersions() {
+        val p = dalyWithSettings()
+        val v = p.parameterValues
+        near(3.65, v["cell_ov_p"])
+        near(2.65, v["cell_uv_p"])
+        near(140.0, v["chg_oc_a"])
+        near(150.0, v["dsg_oc_p"])
+        near(50.0, v["rated_capacity"])
+        near(3.2, v["cell_ref_v"])
+        near(60.0, v["chg_ot_p"])
+        near(-20.0, v["dsg_ut_p"])
+        near(14.0, v["board2_cells"])
+        near(3600.0, v["sleep_time"])
+        near(56.8, v["soc_set"], 1e-9)
+        assertEquals("229LD101000026", p.parameterTexts["battery_code"])
+        assertEquals("229LD101000026", p.snapshot.batteryCode)
+        assertEquals("H1.0_103E_309F", p.snapshot.hardwareVersion)
+        assertEquals("LiFePO4", p.parameterTexts["battery_type"])
+        assertEquals("2024-11-21", p.snapshot.manufactureDate)
+    }
+
+    @Test
+    fun dalyWritesChangeOnlyTheEditedBytes() {
+        val p = dalyWithSettings()
+        fun param(key: String) = p.parameters.first { it.key == key }
+        fun checksumOk(f: ByteArray) = ((0 until 12).sumOf { f.u8(it) } and 0xFF) == f.u8(12)
+
+        val cell = p.writeParameterCommands(param("cell_ov_p"), 3.60).single().bytes
+        assertEquals(0x19, cell.u8(2))
+        assertEquals("0E 10 0E 10 0A F0 0A 5A", cell.copyOfRange(4, 12).toHex())
+        assertTrue(checksumOk(cell))
+
+        val dsg = p.writeParameterCommands(param("dsg_oc_p"), 120.0).single().bytes
+        assertEquals(0x1B, dsg.u8(2))
+        assertEquals(30000 - 1200, dsg.u16be(10))
+
+        val soc = p.writeParameterCommands(param("soc_set"), 80.5).single().bytes
+        assertEquals(0x21, soc.u8(2))
+        assertEquals("18 0B 15 10 1E 00", soc.copyOfRange(4, 10).toHex())
+        assertEquals(805, soc.u16be(10))
+
+        val frames = p.writeTextCommands(param(DalyProtocol.KEY_CODE), "XERA-BMS-2026-0001").map { it.bytes }
+        assertEquals(5, frames.size)
+        assertTrue(frames.all { it.u8(2) == 0x17 && checksumOk(it) })
+        assertEquals(listOf(1, 2, 3, 4, 5), frames.map { it.u8(4) })
+        val text = frames.joinToString("") { String(it.copyOfRange(5, 12), Charsets.ISO_8859_1) }.trimEnd('\u0000')
+        assertEquals("XERA-BMS-2026-0001", text)
+    }
+
+    @Test
+    fun dalyRefusesWritesBeforeSettingsAreRead() {
+        val p = DalyProtocol()
+        assertTrue(p.writeParameterCommands(p.parameters.first { it.key == "cell_ov_p" }, 3.6).isEmpty())
     }
 
     // ---------------------------------------------------------------- JK
@@ -188,7 +269,7 @@ class ProtocolTest {
             assertEquals("layout wide=$wide", 8, s.cellVoltages.size)
             near(cells.sum() / 1000.0, s.voltage)
             near(-12.5, s.current)
-            assertEquals(81, s.soc)
+            near(81.0, s.soc)
             near(80.0, s.remainingAh)
             near(100.0, s.nominalAh)
             assertEquals(12, s.cycles)
@@ -204,7 +285,7 @@ class ProtocolTest {
         val bad = jkCellFrame(false, List(4) { 3300 }, 0, 50).also { it[200] = 0x7F }
         val good = jkCellFrame(false, List(4) { 3310 }, 0, 55)
         assertEquals(1, feedChunked(p, bad + good))
-        assertEquals(55, p.snapshot.soc)
+        near(55.0, p.snapshot.soc)
     }
 
     // ---------------------------------------------------------------- Registry & helpers

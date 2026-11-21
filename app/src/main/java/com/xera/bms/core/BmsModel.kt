@@ -5,12 +5,13 @@ import kotlin.math.abs
 /**
  * One brand-neutral picture of the battery. Every protocol decodes its frames into this,
  * so the UI never needs to know which BMS it is talking to.
- * Units: volts, amps (positive = charging), amp-hours, degrees Celsius.
+ * Units: volts, amps (positive = charging), amp-hours, degrees Celsius, percent.
  */
 data class BmsSnapshot(
     val voltage: Double? = null,
     val current: Double? = null,
-    val soc: Int? = null,
+    /** State of charge in percent. Keeps the decimals the BMS reports (Daly: 0.1 %). */
+    val soc: Double? = null,
     val soh: Int? = null,
     val remainingAh: Double? = null,
     val nominalAh: Double? = null,
@@ -30,6 +31,8 @@ data class BmsSnapshot(
     val hardwareVersion: String? = null,
     val softwareVersion: String? = null,
     val manufactureDate: String? = null,
+    /** User-settable battery code / serial number (Daly "battery code"). */
+    val batteryCode: String? = null,
     val updatedAt: Long = 0L,
 ) {
     val power: Double? get() = if (voltage != null && current != null) voltage * current else null
@@ -67,16 +70,53 @@ data class BmsSnapshot(
 
 data class TimeEstimate(val toFull: Boolean, val hours: Double)
 
-/** A configurable BMS setting, always expressed in display units (V, A, Ah, °C ...). */
+enum class ParamType {
+    /** A number in display units, optionally writable. */
+    NUMBER,
+
+    /** Free text the user can change (for example the battery serial number). */
+    TEXT,
+
+    /** Read-only text such as firmware versions. */
+    INFO,
+}
+
+/**
+ * A BMS setting in display units (V, A, Ah, °C ...).
+ * [group] is the tab it appears under, [section] the card inside that tab.
+ */
 data class BmsParameter(
     val key: String,
     val label: String,
     val unit: String,
     val group: String,
-    val min: Double,
-    val max: Double,
+    val min: Double = 0.0,
+    val max: Double = 0.0,
     val decimals: Int = 0,
     val writable: Boolean = true,
+    val section: String = "",
+    val type: ParamType = ParamType.NUMBER,
+    val maxLength: Int = 0,
+    val note: String? = null,
+)
+
+/** Older protocol files group settings by topic only; this sorts them into the standard tabs. */
+fun BmsParameter.organized(): BmsParameter {
+    if (section.isNotEmpty()) return this
+    val tab = when (group) {
+        "Cell voltage", "Pack voltage", "Current", "Cell difference" -> "Protection"
+        "Temperature" -> "Temperature"
+        else -> "Battery"
+    }
+    return copy(group = tab, section = group)
+}
+
+/** A one-off command such as restarting the BMS. */
+data class BmsAction(
+    val key: String,
+    val label: String,
+    val description: String,
+    val dangerous: Boolean = false,
 )
 
 class Command(
@@ -106,6 +146,8 @@ interface BmsProtocol {
     val parameters: List<BmsParameter>
     val snapshot: BmsSnapshot
     val parameterValues: Map<String, Double>
+    val parameterTexts: Map<String, String> get() = emptyMap()
+    val actions: List<BmsAction> get() = emptyList()
 
     fun reset()
 
@@ -122,6 +164,11 @@ interface BmsProtocol {
     fun balancerCommands(enabled: Boolean): List<Command> = emptyList()
     fun readParameterCommands(): List<Command> = emptyList()
     fun writeParameterCommands(param: BmsParameter, value: Double): List<Command> = emptyList()
+    fun writeTextCommands(param: BmsParameter, text: String): List<Command> = emptyList()
+    fun actionCommands(action: BmsAction): List<Command> = emptyList()
+
+    /** Requests that re-read [param] after a write, so the app can confirm the BMS took it. */
+    fun readBackCommands(param: BmsParameter): List<Command> = readParameterCommands()
 
     /** Handy raw requests offered in the console screen. */
     fun quickCommands(): List<Command> = initCommands()
@@ -130,14 +177,17 @@ interface BmsProtocol {
 abstract class BaseBmsProtocol : BmsProtocol {
     protected var state = BmsSnapshot()
     protected val params = LinkedHashMap<String, Double>()
+    protected val texts = LinkedHashMap<String, String>()
     protected val buffer = FrameBuffer()
 
     override val snapshot: BmsSnapshot get() = state
     override val parameterValues: Map<String, Double> get() = LinkedHashMap(params)
+    override val parameterTexts: Map<String, String> get() = LinkedHashMap(texts)
 
     override fun reset() {
         state = BmsSnapshot()
         params.clear()
+        texts.clear()
         buffer.clear()
     }
 }

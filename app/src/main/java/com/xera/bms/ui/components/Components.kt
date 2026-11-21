@@ -44,6 +44,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import java.util.Locale
 import kotlin.math.PI
 import kotlin.math.max
 import kotlin.math.min
@@ -54,8 +55,8 @@ import kotlin.math.sin
  * The surface ripples gently, faster while charging.
  */
 @Composable
-fun BatteryTank(soc: Int?, charging: Boolean, modifier: Modifier = Modifier) {
-    val level = (soc ?: 0).coerceIn(0, 100) / 100f
+fun BatteryTank(soc: Double?, charging: Boolean, modifier: Modifier = Modifier) {
+    val level = ((soc ?: 0.0).coerceIn(0.0, 100.0) / 100.0).toFloat()
     val animatedLevel by animateFloatAsState(level, tween(900), label = "level")
     val transition = rememberInfiniteTransition(label = "wave")
     val phase by transition.animateFloat(
@@ -122,8 +123,8 @@ fun BatteryTank(soc: Int?, charging: Boolean, modifier: Modifier = Modifier) {
         val textColor = if (animatedLevel > 0.52f) scheme.onPrimary else scheme.onSurface
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
-                text = soc?.toString() ?: "--",
-                style = MaterialTheme.typography.displayMedium.copy(fontWeight = FontWeight.Medium),
+                text = soc?.let { String.format(Locale.US, "%.1f", it) } ?: "--",
+                style = MaterialTheme.typography.headlineLarge.copy(fontWeight = FontWeight.SemiBold),
                 color = textColor,
             )
             Text("percent", style = MaterialTheme.typography.labelMedium, color = textColor.copy(alpha = 0.8f))

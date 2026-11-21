@@ -17,7 +17,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ShowChart
 import androidx.compose.material.icons.filled.BatteryChargingFull
-import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.LinkOff
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.Tune
@@ -51,7 +50,6 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.xera.bms.data.LinkState
 import com.xera.bms.data.SessionStatus
-import com.xera.bms.ui.cells.CellsScreen
 import com.xera.bms.ui.charts.ChartsScreen
 import com.xera.bms.ui.dashboard.DashboardScreen
 import com.xera.bms.ui.more.AlarmsScreen
@@ -63,10 +61,9 @@ import com.xera.bms.ui.params.ParametersScreen
 import com.xera.bms.ui.scan.ScanScreen
 
 enum class Tab(val label: String, val icon: ImageVector) {
-    BATTERY("Battery", Icons.Filled.BatteryChargingFull),
-    CELLS("Cells", Icons.Filled.GridView),
+    BATTERY("Status", Icons.Filled.BatteryChargingFull),
     CHARTS("Charts", Icons.AutoMirrored.Filled.ShowChart),
-    LIMITS("Limits", Icons.Filled.Tune),
+    LIMITS("Settings", Icons.Filled.Tune),
     MORE("More", Icons.Filled.MoreHoriz),
 }
 
@@ -74,7 +71,7 @@ enum class MoreDest(val title: String) {
     ALARMS("Alarms"),
     CONSOLE("Data console"),
     LOGS("Log files"),
-    SETTINGS("Settings"),
+    SETTINGS("App settings"),
 }
 
 @Composable
@@ -221,7 +218,6 @@ private fun ConnectedShell(vm: MainViewModel, status: SessionStatus) {
                             onOpenAlarms = { tab = Tab.MORE; sub = MoreDest.ALARMS },
                             onOpenConsole = { tab = Tab.MORE; sub = MoreDest.CONSOLE },
                         )
-                        Tab.CELLS -> CellsScreen(vm)
                         Tab.CHARTS -> ChartsScreen(vm)
                         Tab.LIMITS -> ParametersScreen(vm)
                         Tab.MORE -> MoreScreen(vm, status, onOpen = { sub = it })

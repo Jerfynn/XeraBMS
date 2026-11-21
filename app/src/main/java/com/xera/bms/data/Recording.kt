@@ -59,7 +59,7 @@ class CsvLogger(dir: File, deviceName: String) {
         }
         val row = mutableListOf(
             timeFormat.format(Date(if (s.updatedAt > 0) s.updatedAt else System.currentTimeMillis())),
-            n(s.voltage, 3), n(s.current, 3), n(s.power, 1), s.soc?.toString().orEmpty(),
+            n(s.voltage, 3), n(s.current, 3), n(s.power, 1), n(s.soc, 1),
             n(s.remainingAh, 2), s.cycles?.toString().orEmpty(),
             n(s.cellMin, 3), n(s.cellMax, 3), n(s.cellDeltaMv, 0),
             b(s.chargeFet), b(s.dischargeFet), n(s.mosTemperature, 1),

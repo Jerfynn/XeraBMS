@@ -82,7 +82,7 @@ class BmsService : Service() {
                     LinkState.RECONNECTING -> "Reconnecting…"
                     LinkState.CONNECTED -> if (snap.hasData) {
                         buildString {
-                            snap.soc?.let { append("$it%   ") }
+                            snap.soc?.let { append(String.format(Locale.US, "%.1f%%   ", it)) }
                             snap.voltage?.let { append(String.format(Locale.US, "%.2f V   ", it)) }
                             snap.current?.let { append(String.format(Locale.US, "%+.2f A", it)) }
                         }

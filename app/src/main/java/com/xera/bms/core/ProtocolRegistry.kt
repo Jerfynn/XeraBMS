@@ -85,6 +85,9 @@ class DemoProtocol : BaseBmsProtocol() {
         BmsParameter("dsg_oc", "Discharge overcurrent", "A", "Current", 1.0, 300.0, 1),
         BmsParameter("chg_ot", "Charge over-temperature", "°C", "Temperature", 0.0, 100.0, 1),
         BmsParameter("bal_start", "Balance start voltage", "V", "Balancing", 2.0, 4.5, 3),
+    ).map { it.organized() } + BmsParameter(
+        KEY_CODE, "Battery serial number", "", "Device",
+        section = "Identity", type = ParamType.TEXT, maxLength = 35,
     )
 
     private var startMs = 0L
@@ -106,6 +109,7 @@ class DemoProtocol : BaseBmsProtocol() {
         params["dsg_oc"] = 150.0
         params["chg_ot"] = 55.0
         params["bal_start"] = 3.400
+        texts[KEY_CODE] = "XERA-DEMO-0001"
     }
 
     override fun reset() {
@@ -128,6 +132,11 @@ class DemoProtocol : BaseBmsProtocol() {
 
     fun applyParam(key: String, value: Double) {
         params[key] = value
+    }
+
+    fun applyText(key: String, value: String) {
+        texts[key] = value
+        state = state.copy(batteryCode = texts[KEY_CODE])
     }
 
     fun tick(nowMs: Long) {
@@ -157,7 +166,7 @@ class DemoProtocol : BaseBmsProtocol() {
         val hi = cells.maxOrNull() ?: base
         val lo = cells.minOrNull() ?: base
         val balancing = if (balancer && hi - lo > 0.015 && current > 0) setOf(cells.indexOf(hi)) else emptySet()
-        val cellTemp = 27.0 + 3.0 * sin(t / 120.0) + abs(current) * 0.08
+        val cellTemp = 27.0 + 3.0 * sin(t / 120.0) + kotlin.math.abs(current) * 0.08
 
         val alarms = buildList {
             if (hi >= (params["cell_ov"] ?: 3.65)) add("Cell overvoltage")
@@ -168,7 +177,7 @@ class DemoProtocol : BaseBmsProtocol() {
         state = state.copy(
             voltage = cells.sum(),
             current = current,
-            soc = socExact.roundToInt(),
+            soc = (socExact * 10).roundToInt() / 10.0,
             soh = 98,
             remainingAh = capacity * socExact / 100.0,
             nominalAh = capacity,
@@ -186,8 +195,11 @@ class DemoProtocol : BaseBmsProtocol() {
             hardwareVersion = "1.0",
             softwareVersion = "1.0.0",
             manufactureDate = "2026-01-15",
+            batteryCode = texts[KEY_CODE],
         )
     }
 
-    private fun abs(v: Double) = if (v < 0) -v else v
+    companion object {
+        const val KEY_CODE = "battery_code"
+    }
 }
