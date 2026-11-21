@@ -86,7 +86,7 @@ fun MoreScreen(vm: MainViewModel, status: SessionStatus, onOpen: (MoreDest) -> U
             }
         }
         item {
-            MoreItem(Icons.Filled.Settings, "App settings", "Polling, logging, units, theme, PIN") {
+            MoreItem(Icons.Filled.Settings, "Settings", "Charge and discharge switches, polling, logging, units, PIN") {
                 onOpen(MoreDest.SETTINGS)
             }
         }
@@ -246,6 +246,7 @@ fun AppSettingsScreen(vm: MainViewModel) {
     var changePin by remember { mutableStateOf(false) }
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        item { BatteryOutputsCard(vm) }
         item {
             SectionCard(title = "Connection") {
                 ChoiceRow("Read the BMS every", listOf(1000L to "1 s", 2000L to "2 s", 5000L to "5 s", 10_000L to "10 s"), s.pollIntervalMs) { v ->

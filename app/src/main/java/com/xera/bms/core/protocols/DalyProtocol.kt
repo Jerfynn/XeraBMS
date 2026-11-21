@@ -9,7 +9,6 @@ import com.xera.bms.core.u32be
 import com.xera.bms.core.u8
 import com.xera.bms.core.uuid16
 import kotlin.math.abs
-import kotlin.math.roundToInt
 
 /**
  * Daly Smart BMS (classic "A5" protocol, Bluetooth dongle or built-in BLE).
@@ -130,7 +129,8 @@ class DalyProtocol(
             0x90 -> state = state.copy(
                 voltage = d.u16be(0) / 10.0,
                 current = (d.u16be(4) - 30000) / 10.0,
-                soc = (d.u16be(6) / 10.0).roundToInt(),
+                // SOC arrives in 0.1 % steps. Truncate (92.6 % -> 92 %) like the Daly app does; rounding showed +1.
+                soc = d.u16be(6) / 10,
             )
             0x93 -> state = state.copy(
                 chargeFet = d.u8(1) != 0,

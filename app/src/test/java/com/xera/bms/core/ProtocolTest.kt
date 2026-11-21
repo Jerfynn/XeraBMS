@@ -126,7 +126,7 @@ class ProtocolTest {
         val s = p.snapshot
         near(53.2, s.voltage, 1e-9)
         near(5.0, s.current, 1e-9)
-        assertEquals(93, s.soc)
+        assertEquals(92, s.soc) // 92.6 % is truncated, matching the Daly app
         assertEquals(42, s.cycles)
         assertEquals(listOf(3.300, 3.310, 3.295, 3.305), s.cellVoltages)
         assertEquals(listOf(25.0, 27.0), s.temperatures)

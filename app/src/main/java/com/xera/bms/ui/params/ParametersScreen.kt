@@ -185,7 +185,7 @@ private fun PinDialog(expected: String, onDismiss: () -> Unit, onUnlocked: () ->
         text = {
             Column {
                 Text(
-                    "The default PIN is 1234. Change it in App settings.",
+                    "The default PIN is 1234. Change it in More > Settings.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

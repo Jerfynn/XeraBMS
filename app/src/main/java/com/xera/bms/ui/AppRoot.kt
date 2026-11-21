@@ -74,7 +74,7 @@ enum class MoreDest(val title: String) {
     ALARMS("Alarms"),
     CONSOLE("Data console"),
     LOGS("Log files"),
-    SETTINGS("App settings"),
+    SETTINGS("Settings"),
 }
 
 @Composable

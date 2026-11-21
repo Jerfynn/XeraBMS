@@ -19,20 +19,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.HourglassEmpty
 import androidx.compose.material.icons.filled.Terminal
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -40,7 +33,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.xera.bms.core.BmsSnapshot
-import com.xera.bms.core.Capability
 import com.xera.bms.data.AppSettings
 import com.xera.bms.data.SessionStatus
 import com.xera.bms.ui.MainViewModel
@@ -51,19 +43,15 @@ import com.xera.bms.ui.components.StatTile
 import com.xera.bms.ui.theme.fmt
 import com.xera.bms.ui.theme.formatHours
 import com.xera.bms.ui.theme.formatTemp
+import java.util.Locale
 import kotlin.math.abs
-
-private enum class SwitchKind { CHARGE, DISCHARGE, BALANCER }
-
-private data class SwitchRequest(val kind: SwitchKind, val on: Boolean)
+import kotlin.math.roundToLong
 
 @Composable
 fun DashboardScreen(vm: MainViewModel, onOpenAlarms: () -> Unit, onOpenConsole: () -> Unit) {
     val snap by vm.session.snapshot.collectAsStateWithLifecycle()
-    val caps by vm.session.capabilities.collectAsStateWithLifecycle()
     val status by vm.session.status.collectAsStateWithLifecycle()
     val settings by vm.settings.collectAsStateWithLifecycle()
-    var pending by remember { mutableStateOf<SwitchRequest?>(null) }
 
     if (status.explorer) {
         EmptyState(
@@ -96,25 +84,7 @@ fun DashboardScreen(vm: MainViewModel, onOpenAlarms: () -> Unit, onOpenConsole: 
         item { Stats(snap) }
         if (snap.alarms.isNotEmpty()) item { AlarmCard(snap.alarms, onOpenAlarms) }
         if (snap.temperatures.isNotEmpty() || snap.mosTemperature != null) item { Temperatures(snap, settings) }
-        if (snap.chargeFet != null || snap.dischargeFet != null || caps.contains(Capability.MOSFET_CONTROL)) {
-            item { Switches(snap, caps) { pending = it } }
-        }
         item { DeviceInfo(snap, status) }
-    }
-
-    pending?.let { req ->
-        ConfirmSwitch(
-            request = req,
-            onDismiss = { pending = null },
-            onConfirm = {
-                pending = null
-                when (req.kind) {
-                    SwitchKind.CHARGE -> vm.session.setFets(req.on, snap.dischargeFet ?: true)
-                    SwitchKind.DISCHARGE -> vm.session.setFets(snap.chargeFet ?: true, req.on)
-                    SwitchKind.BALANCER -> vm.session.setBalancer(req.on)
-                }
-            },
-        )
     }
 }
 
@@ -154,12 +124,16 @@ private fun Hero(s: BmsSnapshot) {
             Text("${abs(current).fmt(2)} A", style = MaterialTheme.typography.headlineSmall, color = flowColor)
             Text("${abs(s.power ?: 0.0).fmt(0)} W", style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(8.dp))
-            if (s.remainingAh != null) {
-                Text(
-                    "${s.remainingAh.fmt(1)} of ${s.nominalAh.fmt(1)} Ah",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+            s.remainingAh?.let { remaining ->
+                Text("Remaining", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("${formatMah(remaining)} mAh", style = MaterialTheme.typography.titleMedium)
+                s.nominalAh?.let { nominal ->
+                    Text(
+                        "of ${formatMah(nominal)} mAh",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
             s.timeEstimate()?.let { est ->
                 Text(
@@ -231,44 +205,6 @@ private fun TempChip(label: String, value: String) {
 }
 
 @Composable
-private fun Switches(s: BmsSnapshot, caps: Set<Capability>, onRequest: (SwitchRequest) -> Unit) {
-    val canSwitch = caps.contains(Capability.MOSFET_CONTROL)
-    SectionCard(title = "Outputs") {
-        SwitchRow("Charging", "Lets chargers fill the battery", s.chargeFet ?: false, canSwitch) {
-            onRequest(SwitchRequest(SwitchKind.CHARGE, it))
-        }
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-        SwitchRow("Discharging", "Powers everything connected to the battery", s.dischargeFet ?: false, canSwitch) {
-            onRequest(SwitchRequest(SwitchKind.DISCHARGE, it))
-        }
-        if (caps.contains(Capability.BALANCER_CONTROL) || s.balancerEnabled != null) {
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            SwitchRow("Balancer", "Evens out cell voltages", s.balancerEnabled ?: false, caps.contains(Capability.BALANCER_CONTROL)) {
-                onRequest(SwitchRequest(SwitchKind.BALANCER, it))
-            }
-        }
-        if (!canSwitch) {
-            Text(
-                "This BMS reports these states but doesn't accept switching from XeraBMS.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
-}
-
-@Composable
-private fun SwitchRow(title: String, hint: String, checked: Boolean, enabled: Boolean, onChange: (Boolean) -> Unit) {
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.bodyLarge)
-            Text(hint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        Switch(checked = checked, onCheckedChange = onChange, enabled = enabled)
-    }
-}
-
-@Composable
 private fun DeviceInfo(s: BmsSnapshot, status: SessionStatus) {
     SectionCard(title = "Device") {
         InfoRow("Protocol", status.protocolName)
@@ -290,25 +226,5 @@ private fun InfoRow(label: String, value: String?) {
     }
 }
 
-@Composable
-private fun ConfirmSwitch(request: SwitchRequest, onDismiss: () -> Unit, onConfirm: () -> Unit) {
-    val name = when (request.kind) {
-        SwitchKind.CHARGE -> "charging"
-        SwitchKind.DISCHARGE -> "discharging"
-        SwitchKind.BALANCER -> "the balancer"
-    }
-    val warning = when {
-        request.kind == SwitchKind.DISCHARGE && !request.on ->
-            "Everything powered by this battery will lose power immediately."
-        request.kind == SwitchKind.CHARGE && !request.on ->
-            "Chargers and solar won't be able to charge the battery until you turn this back on."
-        else -> "The BMS may still block this if a protection is active."
-    }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(if (request.on) "Turn on $name?" else "Turn off $name?") },
-        text = { Text(warning) },
-        confirmButton = { Button(onClick = onConfirm) { Text(if (request.on) "Turn on" else "Turn off") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
-}
+/** 84.2 Ah -> "84,200" */
+private fun formatMah(ah: Double): String = String.format(Locale.US, "%,d", (ah * 1000).roundToLong())
